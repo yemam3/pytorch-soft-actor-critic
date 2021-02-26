@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.optim import Adam
 from utils import soft_update, hard_update
 from model import GaussianPolicy, QNetwork, DeterministicPolicy
-
+import numpy as np
 
 class SAC(object):
     def __init__(self, num_inputs, action_space, args):
@@ -49,9 +49,36 @@ class SAC(object):
             _, _, action = self.policy.sample(state)
         return action.detach().cpu().numpy()[0]
 
-    def update_parameters(self, memory, batch_size, updates):
-        # Sample a batch from memory
-        state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=batch_size)
+    def update_parameters(self, memory, batch_size, updates, memory_model=None, real_ratio=None):
+        """
+
+        Parameters
+        ----------
+        memory : ReplayMemory
+        batch_size : int
+        updates : int
+        memory_model : ReplayMemory, optional
+                If not none, perform model-based RL.
+        real_ratio : float, optional
+                If performing model-based RL, then real_ratio*batch_size are sampled from the real buffer, and the rest
+                is sampled from the model buffer.
+        Returns
+        -------
+
+        """
+
+        # Model-based vs regular RL
+        if memory_model and real_ratio:
+            state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=int(real_ratio*batch_size))
+            state_batch_m, action_batch_m, reward_batch_m, next_state_batch_m, mask_batch_m = memory.sample(
+                batch_size=int((1-real_ratio) * batch_size))
+            state_batch = np.vstack((state_batch, state_batch_m))
+            action_batch = np.vstack((action_batch, action_batch_m))
+            reward_batch = np.hstack((reward_batch, reward_batch_m))
+            next_state_batch = np.vstack((next_state_batch, next_state_batch_m))
+            mask_batch = np.hstack((mask_batch, mask_batch_m))
+        else:
+            state_batch, action_batch, reward_batch, next_state_batch, mask_batch = memory.sample(batch_size=batch_size)
 
         state_batch = torch.FloatTensor(state_batch).to(self.device)
         next_state_batch = torch.FloatTensor(next_state_batch).to(self.device)
